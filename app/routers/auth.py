@@ -46,13 +46,13 @@ async def login(payload: LoginPayload):
         resp = JSONResponse(content=normalize_doc(r, exclude={"password_hash"}))
         access_max_age = int(getattr(settings, "access_token_expires_seconds", 15 * 60))
         refresh_max_age = int(getattr(settings, "refresh_token_expires_seconds", 7 * 24 * 3600))
-        # set HttpOnly cookies for tokens; set user_id cookie (not HttpOnly) for client convenience
-        resp.set_cookie("access_token", r.get("access_token"), max_age=access_max_age, secure=True, httponly=True, samesite="lax")
-        resp.set_cookie("refresh_token", r.get("refresh_token"), max_age=refresh_max_age, secure=True, httponly=True, samesite="lax")
+        # Set HttpOnly cookies for tokens with SameSite=None for cross-origin requests
+        resp.set_cookie("access_token", r.get("access_token"), max_age=access_max_age, secure=True, httponly=True, samesite="none")
+        resp.set_cookie("refresh_token", r.get("refresh_token"), max_age=refresh_max_age, secure=True, httponly=True, samesite="none")
         # user id available to JS (not HttpOnly) so UI can show current user; keep it minimal
         user = r.get("user") or {}
         if user and user.get("_id"):
-            resp.set_cookie("user_id", user.get("_id"), max_age=access_max_age, secure=True, httponly=False, samesite="lax")
+            resp.set_cookie("user_id", user.get("_id"), max_age=access_max_age, secure=True, httponly=False, samesite="none")
         return resp
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))

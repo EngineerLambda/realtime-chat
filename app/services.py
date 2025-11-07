@@ -1,5 +1,5 @@
-from .repositories import UserRepository, SessionRepository, MessageRepository, GroupRepository
-from .utils import hash_password, verify_password, create_access_token
+from .database import UserRepository, SessionRepository, MessageRepository, GroupRepository, ConversationRepository
+from .utils import hash_password, verify_password, create_access_token, normalize_doc
 from datetime import datetime, timedelta
 from .config import settings
 from typing import Optional
@@ -50,96 +50,78 @@ class ChatService:
     def __init__(self):
         self.msgs = MessageRepository()
         self.groups = GroupRepository()
-        from .repositories import ConversationRepository
+        self.users = UserRepository()
         self.convs = ConversationRepository()
 
     async def create_dm(self, user_a: str, user_b: str) -> dict:
-        """Create or return an existing DM conversation document between two user ids.
-        Returns the conversation document (with _id and participant_ids).
-        Also provides a canonical room id string under `room_id` key: dm:<a>-<b>
-        """
-        # check existing
+        print(f"Creating or retrieving DM between {user_a} and {user_b}")  # Debug log
         existing = await self.convs.find_dm_between(user_a, user_b)
         ids = sorted([user_a, user_b])
         room_id = f"dm:{ids[0]}-{ids[1]}"
         if existing:
+            print(f"Existing DM found: {existing}")  # Debug log
             existing["room_id"] = room_id
             return existing
         doc = {"participant_ids": ids, "type": "dm"}
         created = await self.convs.create(doc)
         created["room_id"] = room_id
+        print(f"New DM created: {created}")  # Debug log
         return created
 
     async def list_user_chats(self, user_id: str):
-        """Return groups and conversations for a user.
-        Returns {groups: [...], conversations: [...]} where conversations include room_id.
-        """
+        print(f"Listing chats for user {user_id}")  # Debug log
         groups = await self.groups.find_by_member(user_id)
         convs = await self.convs.find_by_participant(user_id)
-        # add computed room_id for each conversation (for DMs)
-        out_convs = []
+        print(f"Groups found: {groups}")  # Debug log
+        print(f"Conversations found: {convs}")  # Debug log
+        
+        # Process conversations to add room_id and display names
+        processed_convs = []
         for c in convs:
             if c.get("type") == "dm":
                 parts = c.get("participant_ids", [])
                 if len(parts) == 2:
                     c["room_id"] = f"dm:{parts[0]}-{parts[1]}"
-            out_convs.append(c)
-        # attach last message summary for each conversation and group for sidebar preview
-        from .repositories import UserRepository
-        user_repo = UserRepository()
-        # attach last message for convs
-        for c in out_convs:
-            room_id = c.get("room_id")
-            if room_id:
-                last = await self.msgs.list_for_chat(room_id, 1)
-                if last:
-                    m = last[0]
-                    # try to attach sender username
-                    sender_id = m.get("sender_id")
-                    if sender_id:
-                        u = await user_repo.find_by_id(sender_id)
-                        m["sender_username"] = u.get("username") if u else None
-                    c["last_message"] = m
-        # attach last message for groups
-        out_groups = []
-        for g in groups:
-            chat_id = f"group:{g.get('_id')}"
-            last = await self.msgs.list_for_chat(chat_id, 1)
-            if last:
-                m = last[0]
-                sender_id = m.get("sender_id")
-                if sender_id:
-                    u = await user_repo.find_by_id(sender_id)
-                    m["sender_username"] = u.get("username") if u else None
-                g["last_message"] = m
-            out_groups.append(g)
+                    other_id = next((pid for pid in parts if pid != user_id), user_id)
+                    if other_id:
+                        other_user = await self.users.find_by_id(other_id)
+                        if other_user:
+                            c["participant_display_name"] = other_user.get("username")
+            processed_convs.append(c)
 
-        return {"groups": out_groups, "conversations": out_convs}
+        # Attach last_message for all processed chats
+        for chat in processed_convs + groups:
+            messages = chat.get("messages", [])
+            if messages:
+                chat["last_message"] = messages[-1]
+
+        # Sort conversations and groups by last_message timestamp
+        all_chats = processed_convs + groups
+        all_chats.sort(key=lambda x: x.get("last_message", {}).get("created_at", datetime.min), reverse=True)
+
+        print(f"Processed chats: {all_chats}")  # Debug log
+        return {"groups": groups, "conversations": processed_convs}
 
     async def post_message(self, chat_id: str, sender_id: str, content: str, is_group: bool = False) -> dict:
-        msg = {"chat_id": chat_id, "sender_id": ObjectId(sender_id), "content": content, "is_group": is_group}
-        created = await self.msgs.create(msg)
-        # enrich with sender username for client convenience
-        from .repositories import UserRepository
+        print(f"Posting message to chat {chat_id} by user {sender_id}")  # Debug log
+        msg = {"sender_id": sender_id, "content": content, "created_at": datetime.utcnow()}
         user = await UserRepository().find_by_id(sender_id)
         if user:
-            created["sender_username"] = user.get("username")
+            msg["sender_username"] = user.get("username")
+
+        if is_group:
+            group_id = chat_id.split(":")[-1]
+            await self.groups.add_message(group_id, msg)
         else:
-            created["sender_username"] = None
-        return created
+            conv = await self.convs.find_dm_between(*chat_id.split(":")[-1].split("-"))
+            if conv:
+                await self.convs.add_message(conv["_id"], msg)
+
+        msg["chat_id"] = chat_id
+        print(f"Message saved: {msg}")  # Debug log
+        return normalize_doc(msg)
 
     async def get_history(self, chat_id: str, limit: int = 100):
-        msgs = await self.msgs.list_for_chat(chat_id, limit)
-        # attach sender usernames
-        from .repositories import UserRepository
-        user_repo = UserRepository()
-        out = []
-        for m in msgs:
-            sender_id = m.get("sender_id")
-            if sender_id:
-                user = await user_repo.find_by_id(sender_id)
-                m["sender_username"] = user.get("username") if user else None
-            else:
-                m["sender_username"] = None
-            out.append(m)
-        return out
+        # This method is no longer needed as messages are embedded.
+        # Kept for reference, but should be removed.
+        return []

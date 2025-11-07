@@ -1,5 +1,5 @@
 from .db import connect
-from datetime import datetime, timedelta
+from datetime import datetime
 from bson import ObjectId
 from typing import Optional, List
 from .utils import normalize_doc
@@ -23,6 +23,22 @@ class UserRepository:
     async def find_by_id(self, _id: str) -> Optional[dict]:
         doc = await self.col.find_one({"_id": ObjectId(_id)})
         return normalize_doc(doc)
+
+    async def search_by_username(self, query: str, limit: int = 20, exclude_id: str = None) -> List[dict]:
+        """Search for users by username, case-insensitive."""
+        find_filter = {"username": {"$regex": query, "$options": "i"}}
+        if exclude_id:
+            find_filter["_id"] = {"$ne": ObjectId(exclude_id)}
+        cursor = self.col.find(find_filter).limit(limit)
+        return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor]
+
+    async def list_all(self, exclude_id: str = None) -> List[dict]:
+        """List all users, optionally excluding one by id."""
+        find_filter = {}
+        if exclude_id:
+            find_filter["_id"] = {"$ne": ObjectId(exclude_id)}
+        cursor = self.col.find(find_filter).sort("username", 1)
+        return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor]
 
 
 class SessionRepository:
@@ -59,6 +75,9 @@ class MessageRepository:
         cursor = self.col.find({"chat_id": chat_id}).sort("created_at", -1).limit(limit)
         return [normalize_doc(m) async for m in cursor]
 
+    async def delete_for_chat(self, chat_id: str):
+        await self.col.delete_many({"chat_id": chat_id})
+
 
 class GroupRepository:
     def __init__(self):
@@ -79,6 +98,10 @@ class GroupRepository:
         # returns groups where `members` array contains the user_id
         cursor = self.col.find({"members": user_id}).sort("created_at", -1)
         return [normalize_doc(g) async for g in cursor]
+
+    async def add_message(self, group_id: str, message: dict):
+        """Push a message to the group's messages array."""
+        await self.col.update_one({"_id": ObjectId(group_id)}, {"$push": {"messages": message}})
 
 
 class ConversationRepository:
@@ -110,11 +133,7 @@ class ConversationRepository:
     async def find_by_id(self, _id: str) -> Optional[dict]:
         doc = await self.col.find_one({"_id": ObjectId(_id)})
         return normalize_doc(doc)
-    
-    async def search_by_username(self, query: str, limit: int = 20, exclude_id: str = None) -> List[dict]:
-        """Search for users by username, case-insensitive."""
-        find_filter = {"username": {"$regex": query, "$options": "i"}}
-        if exclude_id:
-            find_filter["_id"] = {"$ne": ObjectId(exclude_id)}
-        cursor = self.col.find(find_filter).limit(limit)
-        return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor]
+
+    async def add_message(self, conv_id: str, message: dict):
+        """Push a message to the conversation's messages array."""
+        await self.col.update_one({"_id": ObjectId(conv_id)}, {"$push": {"messages": message}})
