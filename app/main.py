@@ -1,16 +1,34 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from .config import settings
-from .db import connect, close
+from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from .utils.config import settings
+from .utils.db import connect, close
 from .routers import auth, chat
-from fastapi.staticfiles import StaticFiles
-import os
-from .socketio_server import sio
+from .utils.socketio_server import sio
 from socketio import ASGIApp as SocketIOASGIApp
+from fastapi.openapi.models import APIKey
+from fastapi.openapi.utils import get_openapi
+from .utils.deps import get_current_user_from_cookie
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
+api_key_scheme = APIKey(name="Authorization", scheme_name="Bearer", type="apiKey", **{"in": "header"})
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.app_name, debug=settings.debug)
+    app = FastAPI(
+        title=settings.app_name,
+        debug=settings.debug,
+    )
+
+    # Add CORS middleware to allow cross-origin requests from the frontend
+    # In production, you should restrict this to your frontend's domain
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[],  # No origins needed for same-site hosting
+        allow_credentials=True,
+        allow_methods=["*"],  # Allows all methods
+        allow_headers=["*"],  # Allows all headers
+    )
 
     @app.on_event("startup")
     async def startup():
@@ -20,46 +38,42 @@ def create_app() -> FastAPI:
     async def shutdown():
         close()
 
+    # Routers that do NOT require auth by default
     app.include_router(auth.router)
-    app.include_router(chat.router)
 
-    # static
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    # Routers that DO require auth by default
+    app.include_router(chat.router, dependencies=[Depends(get_current_user_from_cookie)])
 
-    @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request):
-        path = os.path.join(static_dir, "index.html")
-        with open(path, "r") as f:
-            return HTMLResponse(f.read())
-
-    @app.get("/chat", response_class=HTMLResponse)
-    async def chat_page(request: Request):
-        # protect chat page: if no valid access_token cookie, redirect to login page
-        from .utils import decode_token
-        token = request.cookies.get("access_token")
-        if not token:
-            from fastapi.responses import RedirectResponse
-            return RedirectResponse(url="/")
-        try:
-            payload = decode_token(token)
-        except Exception:
-            from fastapi.responses import RedirectResponse
-            return RedirectResponse(url="/")
-        path = os.path.join(static_dir, "chat.html")
-        with open(path, "r") as f:
-            return HTMLResponse(f.read())
-
-    # admin: quick model counts
-    @app.get("/admin/models")
-    async def admin_models():
-        db = connect()
-        return {
-            "users": await db["users"].count_documents({}),
-            "sessions": await db["sessions"].count_documents({}),
-            "groups": await db["groups"].count_documents({}),
-            "messages": await db["messages"].count_documents({}),
+    # Custom OpenAPI schema
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        openapi_schema = get_openapi(
+            title=settings.app_name,
+            version="1.0.0",
+            description="Realtime Chat API",
+            routes=app.routes,
+        )
+        openapi_schema["components"]["securitySchemes"] = {
+            "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
         }
+        openapi_schema["security"] = [{"BearerAuth": []}]
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+    app.openapi = custom_openapi
+
+    # Serve chat.html at the /chat endpoint
+    @app.get("/chat")
+    async def serve_chat():
+        return FileResponse("static/chat.html")
+
+    # Serve index.html at the root endpoint
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        return FileResponse("static/index.html")
+
+    # Mount the static directory for CSS, JS, etc.
+    app.mount("/", StaticFiles(directory="static"), name="static")
 
     return app
 

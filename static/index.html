@@ -4,11 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Realtime Chat - Login</title>
+    <link rel="icon" href="data:," /> <!-- Suppress favicon.ico requests -->
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body class="bg-gray-100 min-h-screen flex items-center justify-center">
     <div class="w-full max-w-2xl bg-white shadow rounded p-6">
-      <h2 class="text-2xl font-semibold mb-4">Realtime Chat — Auth</h2>
+      <h2 class="text-2xl font-semibold mb-4">Realtime Chat</h2>
 
       <div class="grid grid-cols-2 gap-6">
         <div>
@@ -31,26 +32,40 @@
     </div>
 
     <script>
+    // --- Configuration ---
+    // Since the frontend is served by the backend, we can use relative paths.
+    const API_BASE_URL = '';
+
     async function post(path, body){
-      const res = await fetch(path, {method:'POST',headers:{'content-type':'application/json'}, body: JSON.stringify(body)})
+      // Use credentials: 'include' to ensure cookies are sent with the request
+      const res = await fetch(path, {
+          method:'POST',headers:{'content-type':'application/json'}, body: JSON.stringify(body), credentials: 'include'
+      })
       return res.json()
     }
 
     document.getElementById('btn_signup').onclick = async ()=>{
+      const statusEl = document.getElementById('status');
+      statusEl.innerText = 'Signing up...';
       const username = document.getElementById('su_username').value
       const email = document.getElementById('su_email').value
       const password = document.getElementById('su_password').value
       const r = await post('/auth/signup', {username,email,password})
-      document.getElementById('status').innerText = JSON.stringify(r)
+      if (r.user) {
+        statusEl.innerText = `Signup successful for ${r.user.username}. Please log in.`;
+      } else {
+        statusEl.innerText = `Signup failed: ${JSON.stringify(r.detail || r)}`;
+      }
     }
 
     document.getElementById('btn_login').onclick = async ()=>{
+      document.getElementById('status').innerText = 'Logging in...';
       const email = document.getElementById('li_email').value
       const password = document.getElementById('li_password').value
       const r = await post('/auth/login', {email,password})
-      if(r.access_token){
+      // The response body from /login is now the user object, not the token
+      if(r.user && r.user._id){
         // server sets secure cookies for access and refresh tokens; redirect to chat page
-        if(r.user && r.user._id) localStorage.setItem('user_id', r.user._id)
         document.getElementById('status').innerText = 'logged in as '+ (r.user?.email || '')
         // navigate to the chat UI
         window.location = '/chat'
