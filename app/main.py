@@ -1,13 +1,13 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from .config import settings
-from .db import connect, close
+from .utils.config import settings
+from .utils.db import connect, close
 from .routers import auth, chat
-from .socketio_server import sio
+from .utils.socketio_server import sio
 from socketio import ASGIApp as SocketIOASGIApp
 from fastapi.openapi.models import APIKey
 from fastapi.openapi.utils import get_openapi
-from .deps import get_current_user_from_cookie
+from .utils.deps import get_current_user_from_cookie
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 

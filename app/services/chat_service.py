@@ -1,49 +1,7 @@
-from .repositories import UserRepository, SessionRepository, MessageRepository, GroupRepository, ConversationRepository
-from .utils import hash_password, verify_password, create_access_token, normalize_doc
-from datetime import datetime, timedelta
-from .config import settings
-from typing import Optional
+from ..utils.repositories import UserRepository, MessageRepository, GroupRepository, ConversationRepository
+from ..utils.utils import normalize_doc
+from datetime import datetime
 from bson import ObjectId
-
-
-class AuthService:
-    def __init__(self):
-        self.users = UserRepository()
-        self.sessions = SessionRepository()
-
-    async def signup(self, username: str, email: str, password: str) -> dict:
-        existing = await self.users.find_by_email(email)
-        if existing:
-            raise ValueError("email_taken")
-        user = {"username": username, "email": email, "password_hash": hash_password(password)}
-        return await self.users.create(user)
-
-    async def login(self, email: str, password: str) -> dict:
-        user = await self.users.find_by_email(email)
-        # user now has ObjectId converted to strings by repository normalize_doc
-        if not user or not verify_password(password, user.get("password_hash", "")):
-            raise ValueError("invalid_credentials")
-
-        access = create_access_token(str(user["_id"]))
-        refresh = create_access_token(str(user["_id"]), expires_delta=settings.refresh_token_expires_seconds)
-        session = {"user_id": user["_id"], "refresh_token": refresh, "expires_at": datetime.utcnow() + timedelta(seconds=settings.refresh_token_expires_seconds)}
-        await self.sessions.create(session)
-
-        # sanitize user before returning (remove password hash)
-        user_sanitized = dict(user)
-        user_sanitized.pop("password_hash", None)
-        return {"access_token": access, "refresh_token": refresh, "user": user_sanitized}
-
-    async def refresh(self, refresh_token: str) -> dict:
-        session = await self.sessions.find_by_refresh(refresh_token)
-        if not session:
-            raise ValueError("invalid_refresh")
-        user_id = session["user_id"]
-        access = create_access_token(str(user_id))
-        return {"access_token": access}
-
-    async def logout(self, refresh_token: str):
-        await self.sessions.delete(refresh_token)
 
 
 class ChatService:
@@ -119,13 +77,10 @@ class ChatService:
         return {"groups": processed_groups, "conversations": processed_convs}
 
     async def post_message(self, chat_id: str, sender_id: str, content: str, is_group: bool = False) -> dict:
-        print(f"Posting message to chat {chat_id} by user {sender_id}")  # Debug log
         msg = {"sender_id": sender_id, "content": content, "created_at": datetime.utcnow()}
-        user = await UserRepository().find_by_id(sender_id)
+        user = await self.users.find_by_id(sender_id)
         if user:
             msg["sender_username"] = user.get("username")
-
-        # Determine if it's a group, DM, or something else, and persist message.
         if chat_id.startswith("group:"):
             group_id = chat_id.split(":", 1)[1]
             if ObjectId.is_valid(group_id):
@@ -134,18 +89,8 @@ class ChatService:
             dm_ids_str = chat_id.split(":", 1)[1]
             dm_ids = dm_ids_str.split("-")
             if len(dm_ids) == 2:
-                # find_dm_between expects sorted ids, but room_id is already sorted
                 conv = await self.convs.find_dm_between(dm_ids[0], dm_ids[1])
                 if conv:
                     await self.convs.add_message(conv["_id"], msg)
-        # Note: Messages to rooms that are not valid groups or DMs will not be persisted.
-        # This is the desired behavior to avoid saving messages to arbitrary/temporary rooms.
-        
         msg["chat_id"] = chat_id
-        print(f"Message saved: {msg}")  # Debug log
         return normalize_doc(msg)
-
-    async def get_history(self, chat_id: str, limit: int = 100):
-        # This method is no longer needed as messages are embedded.
-        # Kept for reference, but should be removed.
-        return []

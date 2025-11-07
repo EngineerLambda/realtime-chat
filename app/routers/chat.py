@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Request
-from ..services import ChatService
+from ..services.chat_service import ChatService
 from typing import Optional
 from pydantic import BaseModel
 

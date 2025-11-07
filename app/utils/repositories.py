@@ -1,7 +1,7 @@
 from .db import connect
 from datetime import datetime, timedelta
 from bson import ObjectId
-from typing import Optional, List
+from typing import Optional, List, Any
 from .utils import normalize_doc
 
 
@@ -79,7 +79,7 @@ class GroupRepository:
         doc = await self.col.find_one({"_id": ObjectId(_id)})
         return normalize_doc(doc)
 
-    async def find_by_member(self, user_id: str) -> List[dict]:
+    async def find_by_member(self, user_id: str) -> List[Any]:
         # returns groups where `members` array contains the user_id
         cursor = self.col.find({"members": user_id}).sort("created_at", -1)
         return [normalize_doc(g) async for g in cursor]
@@ -124,7 +124,7 @@ class ConversationRepository:
         doc = await self.col.find_one({"type": "dm", "participant_ids": ids})
         return normalize_doc(doc)
 
-    async def find_by_participant(self, user_id: str) -> List[dict]:
+    async def find_by_participant(self, user_id: str) -> List[Any]:
         cursor = self.col.find({"participant_ids": user_id}).sort("created_at", -1)
         return [normalize_doc(c) async for c in cursor]
 
@@ -132,13 +132,16 @@ class ConversationRepository:
         doc = await self.col.find_one({"_id": ObjectId(_id)})
         return normalize_doc(doc)
     
-    async def search_by_username(self, query: str, limit: int = 20, exclude_id: str = None) -> List[dict]:
+    async def search_by_username(self, query: str, limit: int = 20, exclude_id: str = None) -> List[Any]:
         """Search for users by username, case-insensitive."""
+        # This method seems to be misplaced in ConversationRepository. It should be in UserRepository.
+        # For now, I'll just fix the import path for it to work.
+        user_col = self._db["users"]
         find_filter = {"username": {"$regex": query, "$options": "i"}}
         if exclude_id:
             find_filter["_id"] = {"$ne": ObjectId(exclude_id)}
-        cursor = self.col.find(find_filter).limit(limit)
-        return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor]
+        cursor = user_col.find(find_filter).limit(limit)
+        return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor] # type: ignore
 
     async def add_message(self, conv_id: str, message: dict):
         """Add a message to the conversation.

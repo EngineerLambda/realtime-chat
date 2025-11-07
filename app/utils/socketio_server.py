@@ -1,6 +1,6 @@
 import socketio
 from .utils import decode_token
-from .services import ChatService
+from ..services.chat_service import ChatService
 from .repositories import UserRepository  # Import the UserRepository
 
 # create a Socket.IO server

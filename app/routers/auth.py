@@ -2,12 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
 from datetime import timedelta
 import logging
-from ..utils import normalize_doc
+from ..utils.utils import normalize_doc
 
 logger = logging.getLogger(__name__)
 from pydantic import BaseModel
-from ..services import AuthService
-from ..config import settings
+from ..services.auth_service import AuthService
+from ..utils.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 auth = AuthService()
