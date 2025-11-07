@@ -76,14 +76,14 @@
 
     <script>
     // --- Configuration ---
-    // When running a separate frontend dev server, set the backend URL
-    const API_BASE_URL = 'http://localhost:8000' // Set this to your FastAPI backend URL
+    // Since the frontend is served by the backend, we can use relative paths.
+    const API_BASE_URL = ''
 
     // We now rely on server-set cookies for auth (access_token HttpOnly cookie).
     // Socket.IO will send cookies automatically on same-origin connections and the server
     // will read the access_token cookie.
-    // For cross-origin, withCredentials must be true for both socket and fetch.
-    const socket = io(API_BASE_URL, { withCredentials: true })
+    // For same-origin, withCredentials is not strictly needed but doesn't hurt.
+    const socket = io(API_BASE_URL, { withCredentials: true });
 
     const activeRoomEl = document.getElementById('active_room')
     let activeRoom = null
@@ -91,7 +91,7 @@
 
     // load chats for the user and render sidebar list
     async function loadChats(){
-      const res = await fetch(`${API_BASE_URL}/chat/chats`, {credentials: 'include'})
+      const res = await fetch(`/chat/chats`, {credentials: 'include'})
       if(res.status === 401){
         // token missing/expired -> send user to login
         window.location = '/'
@@ -105,73 +105,121 @@
     function renderChatList(){
       const container = document.getElementById('chat_list_container');
       container.innerHTML = ''; // Clear previous list
-      const list = document.createElement('div');
-      list.className = 'mt-4';
+
+      // Create a new container for the list
+      const chatListContainer = document.createElement('div');
+      chatListContainer.className = 'mt-4';
 
       // conversations (DMs)
-      const convHeader = document.createElement('h5')
-      convHeader.className = 'font-semibold mt-2'
-      convHeader.innerText = 'Direct messages'
-      list.appendChild(convHeader)
-      (chats.conversations || []).forEach(c=>{
-        const btn = document.createElement('button')
-        btn.className = 'w-full text-left py-1 px-2 rounded hover:bg-gray-200'
-  const currentUserId = (document.cookie || '').split(';').map(c=>c.trim()).find(c=>c.startsWith('user_id='))?.split('=')[1]
-  const title = c.participant_ids.filter(id=> id !== currentUserId)[0] || c.participant_ids[0]
-  // if conversation includes a cached username, prefer it
-  const display = c.participant_display_name || title
-  // preview and timestamp if available
-  let preview = ''
-  if(c.last_message && c.last_message.content){
-    preview = ' — ' + (c.last_message.content.length > 40 ? c.last_message.content.slice(0,37) + '...' : c.last_message.content)
-  }
-  const label = `DM: ${display}${preview}`
-  btn.innerText = label
-        btn.onclick = ()=> openChat(c.room_id)
-        list.appendChild(btn)
-      })
+      const convHeader = document.createElement('h5');
+      convHeader.className = 'font-semibold mt-2';
+      convHeader.innerText = 'Direct messages';
+      chatListContainer.appendChild(convHeader);
+
+      (chats.conversations || []).forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'flex items-center justify-between group';
+        const openBtn = document.createElement('button');
+        openBtn.className = 'flex-grow text-left py-1 px-2 rounded hover:bg-gray-200';
+        const currentUserId = (document.cookie || '').split(';').map(c => c.trim()).find(c => c.startsWith('user_id='))?.split('=')[1];
+        const title = c.participant_ids.filter(id => id !== currentUserId)[0] || c.participant_ids[0];
+        const display = c.participant_display_name || title;
+        let preview = '';
+        if (c.last_message && c.last_message.content) {
+          preview = ' — ' + (c.last_message.content.length > 30 ? c.last_message.content.slice(0, 27) + '...' : c.last_message.content);
+        }
+        const label = `${display}${preview}`;
+        openBtn.innerText = label;
+        openBtn.onclick = () => openChat(c.room_id);
+        item.appendChild(openBtn);
+        const deleteBtn = createDeleteButton(() => deleteChat(c._id, 'conversations'));
+        item.appendChild(deleteBtn);
+        chatListContainer.appendChild(item);
+      });
 
       // groups
-      const grpHeader = document.createElement('h5')
-      grpHeader.className = 'font-semibold mt-4'
-      grpHeader.innerText = 'Groups'
-      list.appendChild(grpHeader)
-      (chats.groups || []).forEach(g=>{
-        const btn = document.createElement('button')
-        btn.className = 'w-full text-left py-1 px-2 rounded hover:bg-gray-200'
-        let preview = ''
-        if(g.last_message && g.last_message.content){
-          preview = ' — ' + (g.last_message.content.length > 40 ? g.last_message.content.slice(0,37) + '...' : g.last_message.content)
-        }
-        btn.innerText = (g.name || g._id) + preview
-        btn.onclick = ()=> openChat('group:'+g._id)
-        list.appendChild(btn)
-      })
+      const grpHeader = document.createElement('h5');
+      grpHeader.className = 'font-semibold mt-4';
+      grpHeader.innerText = 'Groups';
+      chatListContainer.appendChild(grpHeader);
 
-      container.appendChild(list);
+      (chats.groups || []).forEach(g => {
+        const item = document.createElement('div');
+        item.className = 'flex items-center justify-between group';
+        const openBtn = document.createElement('button');
+        openBtn.className = 'flex-grow text-left py-1 px-2 rounded hover:bg-gray-200';
+        let preview = '';
+        if (g.last_message && g.last_message.content) {
+          preview = ' — ' + (g.last_message.content.length > 30 ? g.last_message.content.slice(0, 27) + '...' : g.last_message.content);
+        }
+        openBtn.innerText = (g.name || g._id) + preview;
+        openBtn.onclick = () => openChat('group:' + g._id);
+        item.appendChild(openBtn);
+        const deleteBtn = createDeleteButton(() => deleteChat(g._id, 'groups'));
+        item.appendChild(deleteBtn);
+        chatListContainer.appendChild(item);
+      });
+
+      // Append the constructed list to the container
+      container.appendChild(chatListContainer);
     }
 
-    function openChat(room){
-      activeRoom = room
-      const chat = findChatByRoomId(room);
-      let displayName = room; // Default to room ID
-      if (chat) {
-        if (chat.type === 'dm') {
-          const currentUserId = (document.cookie || '').split(';').map(c=>c.trim()).find(c=>c.startsWith('user_id='))?.split('=')[1]
-          const isSelfChat = chat.participant_ids.length === 1 || (chat.participant_ids.length === 2 && chat.participant_ids[0] === chat.participant_ids[1]);
-          displayName = isSelfChat ? `${chat.participant_display_name} (You)` : chat.participant_display_name;
-        } else { // It's a group
-          displayName = chat.name;
-        }
+    function createDeleteButton(onClick) {
+      const btn = document.createElement('button');
+      btn.innerHTML = '&#x1F5D1;'; // Trash can icon
+      btn.className = 'px-2 py-1 text-xs rounded hover:bg-red-200 opacity-0 group-hover:opacity-100 transition-opacity';
+      btn.title = 'Delete Chat';
+      btn.onclick = onClick;
+      return btn;
+    }
+
+    async function deleteChat(id, type) {
+      if (!confirm('Are you sure you want to delete this chat forever?')) return;
+      try {
+        const res = await fetch(`/chat/${type}/${id}`, { method: 'DELETE', credentials: 'include' });
+        if (!res.ok) throw new Error(`Failed to delete: ${res.statusText}`);
+        console.log(`${type} with id ${id} deleted.`);
+        await loadChats(); // Refresh the chat list
+      } catch (error) {
+        console.error('Error deleting chat:', error);
       }
+    }
+
+    async function openChat(room){
+      activeRoom = room;
+      let chat = findChatByRoomId(room);
+      let displayName = room; // Default to room ID as a fallback
+
+      // If chat details aren't in the cache, or it's a group, fetch fresh data.
+      // This is useful for the "Join Room" feature.
+      if (!chat && room.startsWith('group:')) {
+        const groupId = room.split(':')[1];
+        try {
+          const res = await fetch(`/chat/groups/${groupId}`, { credentials: 'include' });
+          if (res.ok) {
+            chat = await res.json();
+            // Manually add room_id for consistency
+            if(chat) chat.room_id = room;
+          }
+        } catch (e) { console.error("Failed to fetch group details", e); }
+      }
+
+      // Determine the display name for the active chat
+      if (chat && chat.type === 'dm') {
+        displayName = chat.participant_display_name || 'DM';
+      } else if (chat) { // It's a group
+        displayName = chat.name || 'Group';
+      }
+
       activeRoomEl.innerText = displayName;
       // update mobile top label
-      const mobileLabel = document.getElementById('active_room_mobile')
-      if(mobileLabel) mobileLabel.innerText = displayName;
+      document.getElementById('active_room_mobile').innerText = displayName;
+
       // join via socket
-      socket.emit('join_room', {room})
-      // History is now pre-loaded, find the chat and render its messages
-      renderHistoryFromCache(room);
+      socket.emit('join_room', {room});
+
+      // Render history from the chat object we found or fetched
+      renderHistory(chat, room);
     }
 
     function findChatByRoomId(roomId) {
@@ -185,34 +233,39 @@
       return null;
     }
 
-    function renderHistoryFromCache(room){
-      const chat = findChatByRoomId(room);
-      const msgs = chat ? (chat.messages || []) : [];
-      const container = document.getElementById('messages_container')
+    function renderHistory(chat, room) {
+      const msgs = chat ? chat.messages || [] : [];
+      console.log(`Rendering history for room ${room || 'unknown'}:`, msgs); // Debug log
+      const container = document.getElementById('messages_container');
       container.innerHTML = '';
-      const currentUser = (document.cookie || '').split(';').map(c=>c.trim()).find(c=>c.startsWith('user_id='))?.split('=')[1]
-      (msgs || []).forEach(m=>{
-        const el = document.createElement('div')
+      const currentUser = (document.cookie || '')
+        .split(';')
+        .map(c => c.trim())
+        .find(c => c.startsWith('user_id='));
+      const currentUserId = currentUser ? currentUser.split('=')[1] : null;
+      (msgs || []).forEach(m => {
+        const el = document.createElement('div');
         el.className = 'mb-2 flex';
-        const isMe = (m.sender_id && m.sender_id === currentUser)
-        const senderLabel = m.sender_username || ((m.sender_id && m.sender_id === currentUser) ? 'You' : (m.sender_id || 'unknown'))
-        // bubble alignment - consistent with socket.on('message')
-        const bubbleClass = isMe ? 'ml-auto bg-blue-100 text-right' : 'mr-auto bg-gray-200 text-left'
+        const isMe = m.sender_id && m.sender_id === currentUserId;
+        const senderLabel = m.sender_username || (isMe ? 'You' : m.sender_id || 'unknown');
+        const bubbleClass = isMe ? 'ml-auto bg-blue-100 text-right' : 'mr-auto bg-gray-200 text-left';
         el.innerHTML = `<div class="p-2 rounded ${bubbleClass} max-w-[80%]">
           <div class="text-sm text-gray-800">${escapeHtml(m.content || '')}</div>
           <div class="text-xs text-gray-500 mt-1">${senderLabel} • ${formatTimestamp(m.created_at)}</div>
-        </div>`
-        container.appendChild(el)
-      })
-      // scroll container to bottom
-      container.scrollTop = container.scrollHeight
-      // enable send button
-      document.getElementById('btn_send').disabled = false
+        </div>`;
+        container.appendChild(el);
+      });
+      container.scrollTop = container.scrollHeight;
+      document.getElementById('btn_send').disabled = false;
     }
 
     socket.on('connect', ()=>{
       console.log('connected', socket.id)
     })
+
+    socket.on('connect_error', (err) => {
+      console.error('Socket.IO connection error:', err); // Debug log
+    });
 
     // small helper to avoid injecting raw HTML
     function escapeHtml(unsafe) {
@@ -262,14 +315,24 @@
     })
 
     document.getElementById('btn_join_room').onclick = async ()=>{
-      const room = document.getElementById('room_input').value.trim();
-      if(!room) {
-        console.error('Room ID is empty');
+      const groupName = document.getElementById('room_input').value.trim();
+      if(!groupName) {
+        console.error('Group name is empty');
         return;
       }
-      console.log(`Attempting to join room: ${room}`); // Debug log
+      console.log(`Attempting to join or create group: ${groupName}`);
       try {
-        await loadChats(); // Refresh sidebar to show new group if it's new for this user
+        // Call the new endpoint to join or create the group
+        const res = await fetch(`/chat/groups/join-or-create`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ name: groupName }),
+          credentials: 'include'
+        });
+        if (!res.ok) throw new Error(`Server responded with ${res.status}`);
+        const group = await res.json();
+        const room = `group:${group._id}`;
+        await loadChats(); // Refresh sidebar to show the new/joined group
         openChat(room);
       } catch (error) {
         console.error('Failed to join room:', error);
@@ -284,7 +347,7 @@
       }
       console.log(`Attempting to open DM with: ${other}`); // Debug log
       try {
-        const res = await fetch(`${API_BASE_URL}/chat/dm/`+encodeURIComponent(other), {method:'POST', credentials:'include'});
+        const res = await fetch(`/chat/dm/`+encodeURIComponent(other), {method:'POST', credentials:'include'});
         if(res.status === 401){
           window.location = '/';
           return;
@@ -302,19 +365,25 @@
       }
     };
 
-    document.getElementById('btn_send').onclick = ()=>{
+    document.getElementById('btn_send').onclick = () => {
       const content = document.getElementById('msg_input').value.trim();
-      if(!activeRoom) {
+      if (!activeRoom) {
         console.error('No active room selected');
         return;
       }
-      if(!content) {
+      if (!content) {
         console.error('Message content is empty');
         return;
       }
+
       console.log(`Sending message to room ${activeRoom}: ${content}`); // Debug log
+
       try {
-        socket.emit('message', {room: activeRoom, content, is_group: activeRoom.startsWith('group:')});
+        socket.emit('message', {
+          room: activeRoom,
+          content
+        });
+        console.log('Message emitted successfully'); // Debug log
         document.getElementById('msg_input').value = '';
       } catch (error) {
         console.error('Failed to send message:', error);
@@ -331,10 +400,10 @@
 
     // --- Logout ---
     document.getElementById('btn_logout').onclick = async () => {
-      const res = await fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
+      const res = await fetch(`/auth/logout`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
         // Redirect to login page on successful logout
-        window.location.href = '/index.html';
+        window.location.href = '/';
       }
     };
 
@@ -353,7 +422,7 @@
 
     // --- All Users List ---
     async function loadAllUsers() {
-      const res = await fetch(`${API_BASE_URL}/chat/users`, { credentials: 'include' });
+      const res = await fetch(`/chat/users`, { credentials: 'include' });
       if (!res.ok) return;
       const users = await res.json();
       renderAllUsers(users);

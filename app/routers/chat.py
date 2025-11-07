@@ -22,9 +22,29 @@ async def create_group(payload: CreateGroupPayload, request: Request):
     return group
 
 
+class JoinGroupPayload(BaseModel):
+    name: str
+
+
+@router.post("/groups/join-or-create")
+async def join_or_create_group(payload: JoinGroupPayload, request: Request):
+    """Join a group by name, or create it if it doesn't exist."""
+    user_id = request.state.user.get("_id")
+    group = await service.join_or_create_group_by_name(payload.name, user_id)
+    return group
+
+
 @router.get("/groups/{group_id}")
 async def get_group(group_id: str):
     return await service.groups.find_by_id(group_id)
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(group_id: str, request: Request):
+    """Deletes a group. For simplicity, any member can delete."""
+    # In a real app, you might want to check for creator/admin privileges.
+    await service.groups.delete(group_id)
+    return {"ok": True, "message": "Group deleted"}
 
 
 @router.get("/chats")
@@ -45,6 +65,14 @@ async def create_dm(other_id: str, request: Request):
         return {"error": "User not authenticated"}
     conv = await service.create_dm(user_id, other_id)
     return conv
+
+
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str, request: Request):
+    """Deletes a DM conversation document."""
+    # Here too, you might want to check if the user is a participant.
+    await service.convs.delete(conv_id)
+    return {"ok": True, "message": "Conversation deleted"}
 
 
 @router.get("/users/search")

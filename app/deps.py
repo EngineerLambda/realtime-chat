@@ -1,6 +1,6 @@
 from fastapi import Depends, HTTPException, status, Request
 from .utils import decode_token
-from .database import UserRepository
+from .repositories import UserRepository
 
 
 async def get_current_user_from_cookie(request: Request):

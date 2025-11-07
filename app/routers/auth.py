@@ -47,12 +47,12 @@ async def login(payload: LoginPayload):
         access_max_age = int(getattr(settings, "access_token_expires_seconds", 15 * 60))
         refresh_max_age = int(getattr(settings, "refresh_token_expires_seconds", 7 * 24 * 3600))
         # Set HttpOnly cookies for tokens with SameSite=None for cross-origin requests
-        resp.set_cookie("access_token", r.get("access_token"), max_age=access_max_age, secure=True, httponly=True, samesite="none")
-        resp.set_cookie("refresh_token", r.get("refresh_token"), max_age=refresh_max_age, secure=True, httponly=True, samesite="none")
+        resp.set_cookie("access_token", r.get("access_token"), max_age=access_max_age, secure=not settings.debug, httponly=True, samesite="lax")
+        resp.set_cookie("refresh_token", r.get("refresh_token"), max_age=refresh_max_age, secure=not settings.debug, httponly=True, samesite="lax")
         # user id available to JS (not HttpOnly) so UI can show current user; keep it minimal
         user = r.get("user") or {}
         if user and user.get("_id"):
-            resp.set_cookie("user_id", user.get("_id"), max_age=access_max_age, secure=True, httponly=False, samesite="none")
+            resp.set_cookie("user_id", user.get("_id"), max_age=access_max_age, secure=not settings.debug, httponly=False, samesite="lax")
         return resp
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -86,7 +86,7 @@ async def logout(payload: LogoutPayload = None, request: Request = None):
         await auth.logout(token)
     # clear cookies on logout
     resp = JSONResponse(content={"ok": True})
-    resp.delete_cookie('access_token')
-    resp.delete_cookie('refresh_token')
-    resp.delete_cookie('user_id')
+    resp.delete_cookie('access_token', secure=not settings.debug, httponly=True, samesite="lax")
+    resp.delete_cookie('refresh_token', secure=not settings.debug, httponly=True, samesite="lax")
+    resp.delete_cookie('user_id', secure=not settings.debug, httponly=False, samesite="lax")
     return resp

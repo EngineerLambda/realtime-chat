@@ -24,6 +24,10 @@ class UserRepository:
         doc = await self.col.find_one({"_id": ObjectId(_id)})
         return normalize_doc(doc)
 
+    async def list_all(self) -> List[dict]:
+        cursor = self.col.find({})
+        return [normalize_doc(user) async for user in cursor]
+
 
 class SessionRepository:
     def __init__(self):
@@ -80,6 +84,23 @@ class GroupRepository:
         cursor = self.col.find({"members": user_id}).sort("created_at", -1)
         return [normalize_doc(g) async for g in cursor]
 
+    async def find_by_name(self, name: str) -> Optional[dict]:
+        doc = await self.col.find_one({"name": name})
+        return normalize_doc(doc)
+
+    async def add_member(self, group_id: str, user_id: str):
+        """Add a user to the group's members list if they are not already a member."""
+        await self.col.update_one({"_id": ObjectId(group_id)}, {"$addToSet": {"members": user_id}})
+
+    async def add_message(self, group_id: str, message: dict):
+        """Add a message to the group's messages array."""
+        message["created_at"] = datetime.utcnow()
+        await self.col.update_one({"_id": ObjectId(group_id)}, {"$push": {"messages": message}})
+
+    async def delete(self, group_id: str):
+        """Delete a group by its ID."""
+        await self.col.delete_one({"_id": ObjectId(group_id)})
+
 
 class ConversationRepository:
     """Simple conversation store for DMs or other conversation metadata.
@@ -118,3 +139,18 @@ class ConversationRepository:
             find_filter["_id"] = {"$ne": ObjectId(exclude_id)}
         cursor = self.col.find(find_filter).limit(limit)
         return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor]
+
+    async def add_message(self, conv_id: str, message: dict):
+        """Add a message to the conversation.
+        This assumes the conversation document has a `messages` array.
+        """
+        message["created_at"] = datetime.utcnow()
+        result = await self.col.update_one(
+            {"_id": ObjectId(conv_id)},
+            {"$push": {"messages": message}}
+        )
+        return result.modified_count > 0
+
+    async def delete(self, conv_id: str):
+        """Delete a conversation by its ID."""
+        await self.col.delete_one({"_id": ObjectId(conv_id)})

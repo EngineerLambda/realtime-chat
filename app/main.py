@@ -8,6 +8,8 @@ from socketio import ASGIApp as SocketIOASGIApp
 from fastapi.openapi.models import APIKey
 from fastapi.openapi.utils import get_openapi
 from .deps import get_current_user_from_cookie
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 api_key_scheme = APIKey(name="Authorization", scheme_name="Bearer", type="apiKey", **{"in": "header"})
 
@@ -22,7 +24,7 @@ def create_app() -> FastAPI:
     # In production, you should restrict this to your frontend's domain
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Allows all origins
+        allow_origins=[],  # No origins needed for same-site hosting
         allow_credentials=True,
         allow_methods=["*"],  # Allows all methods
         allow_headers=["*"],  # Allows all headers
@@ -59,6 +61,20 @@ def create_app() -> FastAPI:
         app.openapi_schema = openapi_schema
         return app.openapi_schema
     app.openapi = custom_openapi
+
+    # Serve chat.html at the /chat endpoint
+    @app.get("/chat")
+    async def serve_chat():
+        return FileResponse("static/chat.html")
+
+    # Serve index.html at the root endpoint
+    @app.get("/", include_in_schema=False)
+    async def serve_index():
+        return FileResponse("static/index.html")
+
+    # Mount the static directory for CSS, JS, etc.
+    app.mount("/", StaticFiles(directory="static"), name="static")
+
     return app
 
 

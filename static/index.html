@@ -33,12 +33,12 @@
 
     <script>
     // --- Configuration ---
-    // Set the base URL of your FastAPI backend
-    const API_BASE_URL = 'http://localhost:8000';
+    // Since the frontend is served by the backend, we can use relative paths.
+    const API_BASE_URL = '';
 
     async function post(path, body){
       // Use credentials: 'include' to ensure cookies are sent with the request
-      const res = await fetch(`${API_BASE_URL}${path}`, {
+      const res = await fetch(path, {
           method:'POST',headers:{'content-type':'application/json'}, body: JSON.stringify(body), credentials: 'include'
       })
       return res.json()
@@ -68,7 +68,7 @@
         // server sets secure cookies for access and refresh tokens; redirect to chat page
         document.getElementById('status').innerText = 'logged in as '+ (r.user?.email || '')
         // navigate to the chat UI
-        window.location = '/chat.html'
+        window.location = '/chat'
       } else {
         document.getElementById('status').innerText = JSON.stringify(r)
       }
