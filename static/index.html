@@ -1,0 +1,63 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Realtime Chat - Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-100 min-h-screen flex items-center justify-center">
+    <div class="w-full max-w-2xl bg-white shadow rounded p-6">
+      <h2 class="text-2xl font-semibold mb-4">Realtime Chat — Auth</h2>
+
+      <div class="grid grid-cols-2 gap-6">
+        <div>
+          <h3 class="font-medium mb-2">Signup</h3>
+          <input id="su_username" placeholder="username" class="w-full border rounded px-3 py-2 mb-2" />
+          <input id="su_email" placeholder="email" class="w-full border rounded px-3 py-2 mb-2" />
+          <input id="su_password" placeholder="password" type="password" class="w-full border rounded px-3 py-2 mb-2" />
+          <button id="btn_signup" class="bg-blue-600 text-white px-4 py-2 rounded">Signup</button>
+        </div>
+
+        <div>
+          <h3 class="font-medium mb-2">Login</h3>
+          <input id="li_email" placeholder="email" class="w-full border rounded px-3 py-2 mb-2" />
+          <input id="li_password" placeholder="password" type="password" class="w-full border rounded px-3 py-2 mb-2" />
+          <button id="btn_login" class="bg-green-600 text-white px-4 py-2 rounded">Login</button>
+        </div>
+      </div>
+
+  <p id="status" class="mt-4 text-sm text-gray-700"></p>
+    </div>
+
+    <script>
+    async function post(path, body){
+      const res = await fetch(path, {method:'POST',headers:{'content-type':'application/json'}, body: JSON.stringify(body)})
+      return res.json()
+    }
+
+    document.getElementById('btn_signup').onclick = async ()=>{
+      const username = document.getElementById('su_username').value
+      const email = document.getElementById('su_email').value
+      const password = document.getElementById('su_password').value
+      const r = await post('/auth/signup', {username,email,password})
+      document.getElementById('status').innerText = JSON.stringify(r)
+    }
+
+    document.getElementById('btn_login').onclick = async ()=>{
+      const email = document.getElementById('li_email').value
+      const password = document.getElementById('li_password').value
+      const r = await post('/auth/login', {email,password})
+      if(r.access_token){
+        // server sets secure cookies for access and refresh tokens; redirect to chat page
+        if(r.user && r.user._id) localStorage.setItem('user_id', r.user._id)
+        document.getElementById('status').innerText = 'logged in as '+ (r.user?.email || '')
+        // navigate to the chat UI
+        window.location = '/chat'
+      } else {
+        document.getElementById('status').innerText = JSON.stringify(r)
+      }
+    }
+    </script>
+  </body>
+ </html>

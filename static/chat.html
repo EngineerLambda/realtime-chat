@@ -1,0 +1,326 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Realtime Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+  </head>
+  <body class="bg-gray-100 min-h-screen">
+    <div class="h-screen flex bg-white">
+      <!-- Sidebar (hidden on small screens) -->
+      <aside id="sidebar" class="hidden md:block w-80 border-r p-4 bg-gray-50">
+        <h3 class="font-semibold mb-4">Rooms / Direct</h3>
+        <div class="mb-3">
+          <input id="room_input" placeholder="room id or user id" class="w-full border rounded px-3 py-2" />
+          <div class="flex gap-2 mt-2">
+            <button id="btn_join_room" class="bg-blue-600 text-white px-3 py-1 rounded">Join Room</button>
+            <button id="btn_join_dm" class="bg-gray-600 text-white px-3 py-1 rounded">Open DM</button>
+          </div>
+        </div>
+
+        <h4 class="font-medium mt-4">Active Room</h4>
+        <p id="active_room" class="text-sm text-gray-600">(none)</p>
+      </aside>
+
+      <!-- Main area -->
+      <div class="flex-1 flex flex-col">
+        <!-- top bar for mobile -->
+        <div class="md:hidden flex items-center justify-between px-3 py-2 border-b bg-white">
+          <div class="flex items-center gap-3">
+            <button id="btn_toggle_sidebar" class="px-2 py-1 bg-gray-200 rounded">☰</button>
+            <div class="text-sm font-medium" id="active_room_mobile">(none)</div>
+          </div>
+          <div>
+            <button id="btn_refresh_chats" class="px-2 py-1 bg-gray-200 rounded">Refresh</button>
+          </div>
+        </div>
+
+        <div class="flex-1 p-4 flex flex-col overflow-hidden">
+              <div class="flex-1 mb-4 overflow-auto" id="messages_container" style="min-height:0;">
+            <!-- messages will be appended here -->
+          </div>
+
+          <div class="flex gap-2">
+            <input id="msg_input" placeholder="Type a message" class="flex-1 border rounded px-3 py-2" />
+            <button id="btn_send" class="bg-green-600 text-white px-4 py-2 rounded">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat modal for opening a specific conversation -->
+    <div id="chat_modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+      <div class="bg-white w-full max-w-2xl rounded shadow p-4 mx-4">
+        <div class="flex items-center justify-between mb-2">
+          <div id="chat_modal_title" class="font-semibold">Chat</div>
+          <div>
+            <button id="chat_modal_close" class="px-3 py-1 bg-gray-200 rounded">Close</button>
+          </div>
+        </div>
+        <div id="chat_modal_messages" class="h-64 overflow-auto border rounded p-2 mb-3"></div>
+        <div class="flex gap-2">
+          <input id="chat_modal_input" placeholder="Type a message" class="flex-1 border rounded px-3 py-2" />
+          <button id="chat_modal_send" class="bg-green-600 text-white px-4 py-2 rounded">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    // We now rely on server-set cookies for auth (access_token HttpOnly cookie).
+    // Socket.IO will send cookies automatically on same-origin connections and the server
+    // will read the access_token cookie.
+    const socket = io()
+
+    const activeRoomEl = document.getElementById('active_room')
+    let activeRoom = null
+    let chats = {groups: [], conversations: []}
+
+    // load chats for the user and render sidebar list
+    async function loadChats(){
+      const res = await fetch('/chat/chats', {credentials: 'same-origin'})
+      if(res.status === 401){
+        // token missing/expired -> send user to login
+        window.location = '/'
+        return
+      }
+      const data = await res.json()
+      chats = data
+      renderChatList()
+    }
+
+    function renderChatList(){
+      const sidebar = document.getElementById('sidebar')
+      // remove old list if present
+      let list = document.getElementById('chat_list')
+      if(list) list.remove()
+      list = document.createElement('div')
+      list.id = 'chat_list'
+      list.className = 'mt-4'
+
+      // conversations (DMs)
+      const convHeader = document.createElement('h5')
+      convHeader.className = 'font-semibold mt-2'
+      convHeader.innerText = 'Direct messages'
+      list.appendChild(convHeader)
+      (chats.conversations || []).forEach(c=>{
+        const btn = document.createElement('button')
+        btn.className = 'w-full text-left py-1 px-2 rounded hover:bg-gray-100'
+  const title = c.participant_ids.filter(id=> id !== (localStorage.getItem('user_id')||''))[0] || c.participant_ids[0]
+  // if conversation includes a cached username, prefer it
+  const display = c.participant_display_name || title
+  // preview and timestamp if available
+  let preview = ''
+  if(c.last_message && c.last_message.content){
+    preview = ' — ' + (c.last_message.content.length > 40 ? c.last_message.content.slice(0,37) + '...' : c.last_message.content)
+  }
+  const label = `DM: ${display}${preview}`
+  btn.innerText = label
+        btn.onclick = ()=> openChat(c.room_id)
+        list.appendChild(btn)
+      })
+
+      // groups
+      const grpHeader = document.createElement('h5')
+      grpHeader.className = 'font-semibold mt-4'
+      grpHeader.innerText = 'Groups'
+      list.appendChild(grpHeader)
+      (chats.groups || []).forEach(g=>{
+        const btn = document.createElement('button')
+        btn.className = 'w-full text-left py-1 px-2 rounded hover:bg-gray-100'
+        let preview = ''
+        if(g.last_message && g.last_message.content){
+          preview = ' — ' + (g.last_message.content.length > 40 ? g.last_message.content.slice(0,37) + '...' : g.last_message.content)
+        }
+        btn.innerText = (g.name || g._id) + preview
+        btn.onclick = ()=> openChat('group:'+g._id)
+        list.appendChild(btn)
+      })
+
+      sidebar.appendChild(list)
+    }
+
+    function openChat(room){
+      activeRoom = room
+      activeRoomEl.innerText = room
+      // update mobile top label
+      const mobileLabel = document.getElementById('active_room_mobile')
+      if(mobileLabel) mobileLabel.innerText = room
+      // join via socket
+      socket.emit('join_room', {room})
+      // open modal and load history into modal
+      openChatModal(room)
+    }
+
+    function openChatModal(room){
+      const modal = document.getElementById('chat_modal')
+      const title = document.getElementById('chat_modal_title')
+      title.innerText = room
+      modal.classList.remove('hidden')
+      // load history and render into modal messages container
+      loadHistoryIntoModal(room)
+    }
+
+    document.getElementById('chat_modal_close').onclick = ()=>{
+      document.getElementById('chat_modal').classList.add('hidden')
+    }
+
+    async function loadHistoryIntoModal(room){
+      const res = await fetch('/chat/history/'+encodeURIComponent(room), {credentials: 'same-origin'})
+      if(res.status === 401){ window.location = '/'; return }
+      const data = await res.json()
+      const container = document.getElementById('chat_modal_messages')
+      container.innerHTML = ''
+      const msgs = (data || []).slice().reverse()
+      const currentUser = (document.cookie || '').split(';').map(c=>c.trim()).find(c=>c.startsWith('user_id='))?.split('=')[1]
+      msgs.forEach(m=>{
+        const el = document.createElement('div')
+        el.className = 'mb-2 flex'
+        const isMe = (m.sender_id && m.sender_id === currentUser)
+        const senderLabel = m.sender_username || ((m.sender_id && m.sender_id === currentUser) ? 'You' : (m.sender_id || 'unknown'))
+        const bubbleClass = isMe ? 'ml-auto bg-blue-50 text-right' : 'mr-auto bg-white text-left'
+        el.innerHTML = `<div class="p-2 rounded ${bubbleClass} max-w-[80%]">
+          <div class="text-sm text-gray-800">${escapeHtml(m.content || '')}</div>
+          <div class="text-xs text-gray-400 mt-1">${senderLabel} • ${formatTimestamp(m.created_at)}</div>
+        </div>`
+        container.appendChild(el)
+      })
+      container.scrollTop = container.scrollHeight
+    }
+
+    // send messages from modal
+    document.getElementById('chat_modal_send').onclick = ()=>{
+      const content = document.getElementById('chat_modal_input').value
+      if(!activeRoom) return alert('Join a room first')
+      socket.emit('message', {room: activeRoom, content, is_group: activeRoom.startsWith('group:')})
+      document.getElementById('chat_modal_input').value = ''
+    }
+
+    async function loadHistory(room){
+      // history endpoint expects the chat_id exactly as used for rooms
+      const res = await fetch('/chat/history/'+encodeURIComponent(room), {credentials: 'same-origin'})
+      if(res.status === 401){
+        window.location = '/'
+        return
+      }
+      const data = await res.json()
+      const container = document.getElementById('messages_container')
+      container.innerHTML = ''
+      // repository returns newest-first; show oldest->newest
+      const msgs = (data || []).slice().reverse()
+      const currentUser = localStorage.getItem('user_id')
+      msgs.forEach(m=>{
+        const el = document.createElement('div')
+        el.className = 'mb-2 flex'
+        const isMe = (m.sender_id && m.sender_id === currentUser)
+        const senderLabel = m.sender_username || ((m.sender_id && m.sender_id === currentUser) ? 'You' : (m.sender_id || 'unknown'))
+        // bubble alignment
+        const bubbleClass = isMe ? 'ml-auto bg-blue-50 text-right' : 'mr-auto bg-white text-left'
+        el.innerHTML = `<div class="p-2 rounded ${bubbleClass} max-w-[80%]">
+          <div class="text-sm text-gray-800">${escapeHtml(m.content || '')}</div>
+          <div class="text-xs text-gray-400 mt-1">${senderLabel} • ${formatTimestamp(m.created_at)}</div>
+        </div>`
+        container.appendChild(el)
+      })
+      // scroll container to bottom
+      container.scrollTop = container.scrollHeight
+    }
+
+    socket.on('connect', ()=>{
+      console.log('connected', socket.id)
+    })
+
+    function formatTimestamp(iso){
+      try{
+        const d = new Date(iso)
+        return d.toLocaleString()
+      }catch(e){
+        return iso
+      }
+    }
+
+    // small helper to avoid injecting raw HTML
+    function escapeHtml(unsafe) {
+      return String(unsafe)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;")
+    }
+
+  socket.on('message', (payload)=>{
+      const container = document.getElementById('messages_container')
+      const m = payload.message || {}
+      const el = document.createElement('div')
+      el.className = 'mb-2 flex'
+      const currentUser = localStorage.getItem('user_id')
+      const isMe = (m.sender_id && m.sender_id === currentUser)
+      const senderLabel = m.sender_username || ((m.sender_id && m.sender_id === currentUser) ? 'You' : (m.sender_id || 'unknown'))
+      const bubbleClass = isMe ? 'ml-auto bg-blue-50 text-right' : 'mr-auto bg-green-50 text-left'
+      el.innerHTML = `<div class="p-2 rounded ${bubbleClass} max-w-[80%]">
+        <div class="text-sm text-gray-800">${escapeHtml(m.content || '')}</div>
+        <div class="text-xs text-gray-500 mt-1">${senderLabel} • ${formatTimestamp(m.created_at)}</div>
+      </div>`
+      container.appendChild(el)
+      // keep scroll at bottom for new messages
+      container.scrollTop = container.scrollHeight
+    })
+
+    socket.on('system', (d)=>{
+      const container = document.getElementById('messages_container')
+      const el = document.createElement('div')
+      el.className = 'mb-2 text-xs text-gray-500'
+      el.innerText = d.message
+      container.prepend(el)
+    })
+
+    document.getElementById('btn_join_room').onclick = ()=>{
+      const room = document.getElementById('room_input').value || 'room1'
+      if(!room) return
+      socket.emit('join_room', {room})
+      activeRoom = room
+      activeRoomEl.innerText = room
+    }
+
+    document.getElementById('btn_join_dm').onclick = ()=>{
+      // create or get a canonical DM via the server so the room_id is canonical (server sorts ids)
+      (async ()=>{
+        const other = document.getElementById('room_input').value
+        if(!other) return
+        const res = await fetch('/chat/dm/'+encodeURIComponent(other), {method:'POST', credentials:'same-origin'})
+        if(res.status === 401){ window.location = '/'; return }
+        const conv = await res.json()
+        // conv should include room_id
+        const room = conv.room_id || `dm:${other}`
+        socket.emit('join_room', {room})
+        activeRoom = room
+        activeRoomEl.innerText = room
+        // optionally open modal with history
+        openChatModal(room)
+      })()
+    }
+
+    // mobile sidebar toggle
+    document.getElementById('btn_toggle_sidebar').onclick = ()=>{
+      const sb = document.getElementById('sidebar')
+      if(!sb) return
+      if(sb.classList.contains('hidden')) sb.classList.remove('hidden')
+      else sb.classList.add('hidden')
+    }
+
+    document.getElementById('btn_refresh_chats').onclick = ()=> loadChats()
+
+    document.getElementById('btn_send').onclick = ()=>{
+      const content = document.getElementById('msg_input').value
+      if(!activeRoom) return alert('Join a room first')
+      socket.emit('message', {room: activeRoom, content, is_group: activeRoom.startsWith('group:')})
+      document.getElementById('msg_input').value = ''
+    }
+
+    // initial load
+    loadChats().catch(()=>{})
+    </script>
+  </body>
+ </html>
