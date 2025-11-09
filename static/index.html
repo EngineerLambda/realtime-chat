@@ -93,7 +93,13 @@
         // navigate to the chat UI
         window.location = '/chat'
       } else {
-        document.getElementById('status').innerText = JSON.stringify(r)
+        let errorMessage = 'An unknown error occurred during login.';
+        if (r && r.detail) {
+            if (r.detail === 'invalid_credentials') {
+                errorMessage = 'Invalid email or password. Please try again.';
+            }
+        }
+        document.getElementById('status').innerText = errorMessage;
       }
     }
 
@@ -131,7 +137,7 @@
         statusEl.innerText = 'Sending reset code...';
         const r = await post('/auth/forgot-password', { email });
         statusEl.innerText = r.message || JSON.stringify(r.detail || r);
-        if (!r.detail) { // Success
+        if (r.message && !r.detail) { // Success
             fpStep1.classList.add('hidden');
             fpStep2.classList.remove('hidden');
         }

@@ -9,8 +9,9 @@ from typing import Literal
 
 load_dotenv()
 
+# SMTP configuration
 SMTP_SERVER = os.getenv("ZOHO_SMTP_SERVER", "smtp.zoho.com")
-SMTP_PORT = int(os.getenv("ZOHO_SMTP_PORT", "465"))
+SMTP_PORT = int(os.getenv("ZOHO_SMTP_PORT", "587")) 
 SMTP_EMAIL = os.getenv("ZOHO_EMAIL")
 SMTP_PASSWORD = os.getenv("ZOHO_APP_PASSWORD")
 
@@ -40,16 +41,22 @@ def send_smtp_email(to: str, subject: str, html: str) -> bool:
     msg["To"] = to
     msg["Subject"] = subject
     msg.attach(MIMEText(html, "html"))
+
     try:
         print(f"Connecting to SMTP server at {SMTP_SERVER}:{SMTP_PORT} as {SMTP_EMAIL}")
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-            _ = server.login(SMTP_EMAIL, SMTP_PASSWORD)
-            _ = server.send_message(msg)
-        print(f"Mail sent successfully to {to} via Zoho SMTP.")
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.send_message(msg)
+        print(f"Mail sent successfully to {to} via Zoho SMTP (TLS).")
         return True
+
     except smtplib.SMTPAuthenticationError as e:
         print(
-            f"SMTP Authentication Failed for {to}: {e}. Please check ZOHO_EMAIL and ZOHO_APP_PASSWORD environment variables, and ensure ZOHO_SMTP_SERVER is correct for your account's region."
+            f"SMTP Authentication Failed for {to}: {e}. Please check ZOHO_EMAIL and ZOHO_APP_PASSWORD "
+            f"environment variables, and ensure ZOHO_SMTP_SERVER is correct for your account's region."
         )
         return False
     except Exception as e:
