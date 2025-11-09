@@ -7,6 +7,8 @@
     <link rel="icon" href="data:," /> <!-- Suppress favicon.ico requests -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+    <!-- For rendering AI's markdown responses -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/showdown/2.1.0/showdown.min.js"></script>
   </head>
   <body class="bg-gray-100 min-h-screen">
     <div class="h-screen flex bg-white">
@@ -84,6 +86,7 @@
     // will read the access_token cookie.
     // For same-origin, withCredentials is not strictly needed but doesn't hurt.
     const socket = io(API_BASE_URL, { withCredentials: true });
+    const markdownConverter = new showdown.Converter();
 
     const activeRoomEl = document.getElementById('active_room')
     let activeRoom = null
@@ -110,6 +113,22 @@
       const chatListContainer = document.createElement('div');
       chatListContainer.className = 'mt-4';
 
+      // Add AI Assistant as the first item
+      const aiHeader = document.createElement('h5');
+      aiHeader.className = 'font-semibold';
+      aiHeader.innerText = 'Assistant';
+      chatListContainer.appendChild(aiHeader);
+      const aiItem = document.createElement('div');
+      aiItem.className = 'flex items-center justify-between group';
+      const openAiBtn = document.createElement('button');
+      openAiBtn.className = 'flex-grow text-left py-1 px-2 rounded hover:bg-indigo-100 font-medium text-indigo-700';
+      openAiBtn.innerText = '🤖 AI Assistant';
+      openAiBtn.onclick = () => openChat('ai_assistant');
+      const clearAiBtn = createClearAiHistoryButton(clearAiHistory);
+      aiItem.appendChild(openAiBtn);
+      aiItem.appendChild(clearAiBtn);
+      chatListContainer.appendChild(aiItem);
+
       // conversations (DMs)
       const convHeader = document.createElement('h5');
       convHeader.className = 'font-semibold mt-2';
@@ -122,8 +141,15 @@
         const openBtn = document.createElement('button');
         openBtn.className = 'flex-grow text-left py-1 px-2 rounded hover:bg-gray-200';
         const currentUserId = (document.cookie || '').split(';').map(c => c.trim()).find(c => c.startsWith('user_id='))?.split('=')[1];
-        const title = c.participant_ids.filter(id => id !== currentUserId)[0] || c.participant_ids[0];
-        const display = c.participant_display_name || title;
+        
+        const isSelfDm = c.participant_ids && c.participant_ids.every(id => id === currentUserId);
+        let display = c.participant_display_name || 'DM'; // Default to the name from backend
+
+        // Override for self-DM case
+        if (isSelfDm) { 
+          display = 'You (Saved Messages)';
+        }
+
         let preview = '';
         if (c.last_message && c.last_message.content) {
           preview = ' — ' + (c.last_message.content.length > 30 ? c.last_message.content.slice(0, 27) + '...' : c.last_message.content);
@@ -131,8 +157,8 @@
         const label = `${display}${preview}`;
         openBtn.innerText = label;
         openBtn.onclick = () => openChat(c.room_id);
-        item.appendChild(openBtn);
         const deleteBtn = createDeleteButton(() => deleteChat(c._id, 'conversations'));
+        item.appendChild(openBtn);
         item.appendChild(deleteBtn);
         chatListContainer.appendChild(item);
       });
@@ -154,8 +180,8 @@
         }
         openBtn.innerText = (g.name || g._id) + preview;
         openBtn.onclick = () => openChat('group:' + g._id);
-        item.appendChild(openBtn);
         const deleteBtn = createDeleteButton(() => deleteChat(g._id, 'groups'));
+        item.appendChild(openBtn);
         item.appendChild(deleteBtn);
         chatListContainer.appendChild(item);
       });
@@ -173,6 +199,15 @@
       return btn;
     }
 
+    function createClearAiHistoryButton(onClick) {
+      const btn = document.createElement('button');
+      btn.innerHTML = '&#x1F5D1;'; // Trash can icon
+      btn.className = 'px-2 py-1 text-xs rounded hover:bg-red-200 opacity-0 group-hover:opacity-100 transition-opacity';
+      btn.title = 'Clear AI Chat History';
+      btn.onclick = onClick;
+      return btn;
+    }
+
     async function deleteChat(id, type) {
       if (!confirm('Are you sure you want to delete this chat forever?')) return;
       try {
@@ -185,7 +220,33 @@
       }
     }
 
+    async function clearAiHistory() {
+      if (!confirm('Are you sure you want to clear your AI chat history? This cannot be undone.')) return;
+      try {
+        const res = await fetch(`/chat/ai/history`, { method: 'DELETE', credentials: 'include' });
+        if (!res.ok) throw new Error(`Failed to clear history: ${res.statusText}`);
+        console.log('AI chat history cleared.');
+        // If the AI chat is currently active, refresh it to show it's empty
+        if (activeRoom === 'ai_assistant') {
+          openChat('ai_assistant');
+        }
+      } catch (error) {
+        console.error('Error clearing AI history:', error);
+      }
+    }
+
     async function openChat(room){
+      // Special handling for AI chat
+      if (room === 'ai_assistant') {
+        activeRoom = room;
+        activeRoomEl.innerText = 'AI Assistant';
+        document.getElementById('active_room_mobile').innerText = 'AI Assistant';
+        const res = await fetch('/chat/ai/history', { credentials: 'include' });
+        const history = await res.json();
+        renderAiHistory(history);
+        return;
+      }
+
       activeRoom = room;
       let chat = findChatByRoomId(room);
       let displayName = room; // Default to room ID as a fallback
@@ -252,6 +313,43 @@
         el.innerHTML = `<div class="p-2 rounded ${bubbleClass} max-w-[80%]">
           <div class="text-sm text-gray-800">${escapeHtml(m.content || '')}</div>
           <div class="text-xs text-gray-500 mt-1">${senderLabel} • ${formatTimestamp(m.created_at)}</div>
+        </div>`;
+        container.appendChild(el);
+      });
+      container.scrollTop = container.scrollHeight;
+      document.getElementById('btn_send').disabled = false;
+    }
+
+    function renderAiHistory(chat) {
+      const msgs = chat ? chat.messages || [] : [];
+      const container = document.getElementById('messages_container');
+      container.innerHTML = '';
+      const currentUserId = (document.cookie || '').split(';').map(c=>c.trim()).find(c=>c.startsWith('user_id='))?.split('=')[1];
+
+      if (!msgs || msgs.length === 0) {
+        const el = document.createElement('div');
+        el.className = 'mb-2 flex';
+        el.innerHTML = `<div class="p-2 rounded bg-indigo-100 text-left max-w-[80%]">
+          <div class="text-sm text-gray-800">Hello! How can I help you today?</div>
+          <div class="text-xs text-gray-500 mt-1">AI Assistant</div>
+        </div>`;
+        container.appendChild(el);
+        return;
+      }
+
+      (msgs || []).forEach(m => {
+        const el = document.createElement('div');
+        el.className = 'mb-2 flex';
+        const isMe = m.role === 'user';
+        const senderLabel = isMe ? 'You' : 'AI Assistant';
+        const bubbleClass = isMe ? 'ml-auto bg-blue-100 text-right' : 'mr-auto bg-indigo-100 text-left';
+        
+        // Render markdown for AI messages
+        const contentHtml = m.role === 'assistant' ? markdownConverter.makeHtml(m.content || '') : escapeHtml(m.content || '');
+
+        el.innerHTML = `<div class="p-2 rounded ${bubbleClass} max-w-[80%]">
+          <div class="text-sm text-gray-800">${contentHtml}</div>
+          <div class="text-xs text-gray-500 mt-1">${senderLabel}</div>
         </div>`;
         container.appendChild(el);
       });
@@ -366,7 +464,7 @@
     };
 
     document.getElementById('btn_send').onclick = () => {
-      const content = document.getElementById('msg_input').value.trim();
+      let content = document.getElementById('msg_input').value.trim();
       if (!activeRoom) {
         console.error('No active room selected');
         return;
@@ -376,17 +474,63 @@
         return;
       }
 
-      console.log(`Sending message to room ${activeRoom}: ${content}`); // Debug log
+      // Handle AI chat separately
+      if (activeRoom === 'ai_assistant') {
+        sendToAi(content);
+      } else {
+        // Regular chat logic
+        console.log(`Sending message to room ${activeRoom}: ${content}`); // Debug log
+        try {
+          socket.emit('message', {
+            room: activeRoom,
+            content
+          });
+          console.log('Message emitted successfully'); // Debug log
+          document.getElementById('msg_input').value = '';
+        } catch (error) {
+          console.error('Failed to send message:', error);
+        }
+      }
+    };
+
+    // --- AI Chat Logic (Integrated) ---
+    async function sendToAi(content) {
+      document.getElementById('msg_input').value = '';
+      document.getElementById('btn_send').disabled = true;
+
+      // Add user message to UI immediately
+      addMessageToContainer({ role: 'user', content: content });
+
+      // Add a temporary AI bubble
+      const aiMessageBubble = addMessageToContainer({ role: 'assistant', content: '...' }, true);
+      let fullResponse = '';
 
       try {
-        socket.emit('message', {
-          room: activeRoom,
-          content
-        });
-        console.log('Message emitted successfully'); // Debug log
-        document.getElementById('msg_input').value = '';
+          const response = await fetch('/chat/ai', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content }),
+              credentials: 'include'
+          });
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+
+          while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              fullResponse += decoder.decode(value, { stream: true });
+              // Update the content of the bubble's inner div
+              aiMessageBubble.querySelector('.text-sm').innerHTML = markdownConverter.makeHtml(fullResponse + '...');
+              document.getElementById('messages_container').scrollTop = document.getElementById('messages_container').scrollHeight;
+          }
+          aiMessageBubble.querySelector('.text-sm').innerHTML = markdownConverter.makeHtml(fullResponse);
       } catch (error) {
-        console.error('Failed to send message:', error);
+          aiMessageBubble.querySelector('.text-sm').innerHTML = 'Sorry, an error occurred.';
+          console.error('AI chat error:', error);
+      } finally {
+          document.getElementById('btn_send').disabled = false;
+          document.getElementById('msg_input').focus();
       }
     };
 
@@ -453,6 +597,28 @@
     // initial load
     loadChats().catch(()=>{})
     loadAllUsers().catch(()=>{})
+    </script>
+    
+    <script>
+    // Helper to add a message to the main container (used by AI chat)
+    function addMessageToContainer(message, returnElement = false) {
+        const container = document.getElementById('messages_container');
+        const el = document.createElement('div');
+        el.className = 'mb-2 flex';
+        const isMe = message.role === 'user';
+        const senderLabel = isMe ? 'You' : 'AI Assistant';
+        const bubbleClass = isMe ? 'ml-auto bg-blue-100 text-right' : 'mr-auto bg-indigo-100 text-left';
+        const contentHtml = message.role === 'assistant' ? markdownConverter.makeHtml(message.content || '') : escapeHtml(message.content || '');
+
+        el.innerHTML = `<div class="p-2 rounded ${bubbleClass} max-w-[80%]">
+          <div class="text-sm text-gray-800">${contentHtml}</div>
+          <div class="text-xs text-gray-500 mt-1">${senderLabel}</div>
+        </div>`;
+        container.appendChild(el);
+        container.scrollTop = container.scrollHeight;
+
+        if (returnElement) return el;
+    }
     </script>
   </body>
  </html>

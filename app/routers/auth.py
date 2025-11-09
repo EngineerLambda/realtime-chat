@@ -1,27 +1,24 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from ..utils.utils import normalize_doc
+from ..utils.models import (
+    SignupPayload,
+    LoginPayload,
+    ForgotPasswordPayload,
+    ResendOTPPayload,
+    ResetPasswordPayload,
+    RefreshPayload,
+    LogoutPayload,
+)
 
 logger = logging.getLogger(__name__)
-from pydantic import BaseModel
 from ..services.auth_service import AuthService
 from ..utils.config import settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 auth = AuthService()
-
-
-class SignupPayload(BaseModel):
-    username: str
-    email: str
-    password: str
-
-
-class LoginPayload(BaseModel):
-    email: str
-    password: str
 
 
 @router.post("/signup")
@@ -58,20 +55,12 @@ async def login(payload: LoginPayload):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-class RefreshPayload(BaseModel):
-    refresh_token: str
-
-
 @router.post("/refresh")
 async def refresh(payload: RefreshPayload):
     try:
         return await auth.refresh(payload.refresh_token)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
-
-
-class LogoutPayload(BaseModel):
-    refresh_token: str
 
 
 @router.post("/logout")
@@ -90,3 +79,51 @@ async def logout(payload: LogoutPayload = None, request: Request = None):
     resp.delete_cookie('refresh_token', secure=not settings.debug, httponly=True, samesite="lax")
     resp.delete_cookie('user_id', secure=not settings.debug, httponly=False, samesite="lax")
     return resp
+
+
+@router.post("/forgot-password")
+async def forgot_password(payload: ForgotPasswordPayload):
+    try:
+        await auth.request_password_reset(payload.email)
+        # Always return a success message to prevent user enumeration
+        return {"message": "If an account with that email exists, a password reset OTP has been sent."}
+    except ConnectionError as e:
+        if str(e) == "email_service_not_configured":
+            raise HTTPException(status_code=503, detail="Email service is not configured.")
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send email.")
+
+
+@router.post("/resend-otp")
+async def resend_otp(payload: ResendOTPPayload):
+    """Resends the OTP for password reset."""
+    try:
+        # Re-using the same logic as forgot-password is correct here
+        await auth.request_password_reset(payload.email)
+        return {"message": "A new password reset OTP has been sent to your email."}
+    except ConnectionError as e:
+        if str(e) == "email_service_not_configured":
+            raise HTTPException(status_code=503, detail="Email service is not configured.")
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send email.")
+
+
+@router.post("/reset-password")
+async def reset_password(payload: ResetPasswordPayload):
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match.")
+
+    try:
+        await auth.reset_password(payload.email, payload.otp_code, payload.new_password)
+        return {"message": "Password has been reset successfully. You can now log in."}
+    except ValueError as e:
+        error_detail = "An error occurred."
+        error_map = {
+            "invalid_user": "Invalid user. Please check the email and try again.",
+            "invalid_otp": "The OTP you entered is incorrect.",
+            "expired_otp": "The OTP has expired. Please request a new one.",
+        }
+        error_detail = error_map.get(str(e), error_detail)
+        raise HTTPException(status_code=400, detail=error_detail)
+    except Exception:
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during password reset.")

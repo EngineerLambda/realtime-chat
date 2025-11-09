@@ -10,22 +10,45 @@
   <body class="bg-gray-100 min-h-screen flex items-center justify-center">
     <div class="w-full max-w-2xl bg-white shadow rounded p-6">
       <h2 class="text-2xl font-semibold mb-4">Realtime Chat</h2>
-
-      <div class="grid grid-cols-2 gap-6">
+      
+      <div id="auth-forms" class="grid grid-cols-2 gap-6">
         <div>
           <h3 class="font-medium mb-2">Signup</h3>
           <input id="su_username" placeholder="username" class="w-full border rounded px-3 py-2 mb-2" />
           <input id="su_email" placeholder="email" class="w-full border rounded px-3 py-2 mb-2" />
           <input id="su_password" placeholder="password" type="password" class="w-full border rounded px-3 py-2 mb-2" />
-          <button id="btn_signup" class="bg-blue-600 text-white px-4 py-2 rounded">Signup</button>
+          <button id="btn_signup" class="bg-blue-600 text-white px-4 py-2 rounded w-full">Signup</button>
         </div>
 
         <div>
           <h3 class="font-medium mb-2">Login</h3>
           <input id="li_email" placeholder="email" class="w-full border rounded px-3 py-2 mb-2" />
           <input id="li_password" placeholder="password" type="password" class="w-full border rounded px-3 py-2 mb-2" />
-          <button id="btn_login" class="bg-green-600 text-white px-4 py-2 rounded">Login</button>
+          <button id="btn_login" class="bg-green-600 text-white px-4 py-2 rounded w-full">Login</button>
+          <div class="text-center mt-2">
+            <a href="#" id="forgot-password-link" class="text-sm text-blue-600 hover:underline">Forgot Password?</a>
+          </div>
         </div>
+      </div>
+
+      <div id="forgot-password-form" class="hidden">
+        <h3 class="font-medium mb-2">Reset Password</h3>
+        <div id="fp-step-1">
+            <p class="text-sm text-gray-600 mb-2">Enter your email to receive a password reset code.</p>
+            <input id="fp_email" placeholder="Your email" class="w-full border rounded px-3 py-2 mb-2" />
+            <button id="btn_send_otp" class="bg-indigo-600 text-white px-4 py-2 rounded w-full">Send Reset Code</button>
+        </div>
+        <div id="fp-step-2" class="hidden">
+            <p class="text-sm text-gray-600 mb-2">A code was sent to your email. Enter it below to reset your password.</p>
+            <input id="fp_otp" placeholder="6-digit code" class="w-full border rounded px-3 py-2 mb-2" />
+            <input id="fp_new_password" placeholder="New password" type="password" class="w-full border rounded px-3 py-2 mb-2" />
+            <input id="fp_confirm_new_password" placeholder="Confirm new password" type="password" class="w-full border rounded px-3 py-2 mb-2" />
+            <button id="btn_reset_password" class="bg-indigo-600 text-white px-4 py-2 rounded w-full">Reset Password</button>
+            <div class="text-center mt-2">
+              <a href="#" id="resend-otp-link" class="text-sm text-blue-600 hover:underline">Didn't get a code? Resend.</a>
+            </div>
+        </div>
+         <a href="#" id="back-to-login-link" class="text-sm text-blue-600 hover:underline mt-4 block text-center">Back to Login</a>
       </div>
 
   <p id="status" class="mt-4 text-sm text-gray-700"></p>
@@ -73,6 +96,75 @@
         document.getElementById('status').innerText = JSON.stringify(r)
       }
     }
+
+    // --- Forgot Password UI Logic ---
+    const authForms = document.getElementById('auth-forms');
+    const forgotPasswordForm = document.getElementById('forgot-password-form');
+    const forgotPasswordLink = document.getElementById('forgot-password-link');
+    const backToLoginLink = document.getElementById('back-to-login-link');
+    const fpStep1 = document.getElementById('fp-step-1');
+    const fpStep2 = document.getElementById('fp-step-2');
+    const statusEl = document.getElementById('status');
+
+    forgotPasswordLink.onclick = (e) => {
+        e.preventDefault();
+        authForms.classList.add('hidden');
+        forgotPasswordForm.classList.remove('hidden');
+        statusEl.innerText = '';
+    };
+
+    backToLoginLink.onclick = (e) => {
+        e.preventDefault();
+        authForms.classList.remove('hidden');
+        forgotPasswordForm.classList.add('hidden');
+        fpStep1.classList.remove('hidden');
+        fpStep2.classList.add('hidden');
+        statusEl.innerText = '';
+    };
+
+    document.getElementById('btn_send_otp').onclick = async () => {
+        const email = document.getElementById('fp_email').value;
+        if (!email) {
+            statusEl.innerText = 'Please enter your email address.';
+            return;
+        }
+        statusEl.innerText = 'Sending reset code...';
+        const r = await post('/auth/forgot-password', { email });
+        statusEl.innerText = r.message || JSON.stringify(r.detail || r);
+        if (!r.detail) { // Success
+            fpStep1.classList.add('hidden');
+            fpStep2.classList.remove('hidden');
+        }
+    };
+
+    document.getElementById('resend-otp-link').onclick = async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('fp_email').value;
+        if (!email) {
+            statusEl.innerText = 'Email address is missing.';
+            return;
+        }
+        statusEl.innerText = 'Resending OTP...';
+        const r = await post('/auth/resend-otp', { email });
+        statusEl.innerText = r.message || JSON.stringify(r.detail || r);
+    };
+
+    document.getElementById('btn_reset_password').onclick = async () => {
+        const email = document.getElementById('fp_email').value;
+        const otp_code = document.getElementById('fp_otp').value;
+        const new_password = document.getElementById('fp_new_password').value;
+        const confirm_new_password = document.getElementById('fp_confirm_new_password').value;
+        if (new_password !== confirm_new_password) {
+            statusEl.innerText = 'Passwords do not match.';
+            return;
+        }
+        statusEl.innerText = 'Resetting password...';
+        const r = await post('/auth/reset-password', { email, otp_code, new_password, confirm_new_password });
+        statusEl.innerText = r.message || JSON.stringify(r.detail || r);
+        if (r.message && !r.detail) { // Success
+            setTimeout(() => backToLoginLink.click(), 3000);
+        }
+    };
     </script>
   </body>
  </html>

@@ -28,6 +28,19 @@ class UserRepository:
         cursor = self.col.find({})
         return [normalize_doc(user) async for user in cursor]
 
+    async def update(self, _id: Any, data: dict):
+        if not isinstance(_id, ObjectId):
+            _id = ObjectId(_id)
+        await self.col.update_one({"_id": _id}, {"$set": data})
+
+    async def search_by_username(self, query: str, limit: int = 20, exclude_id: str = None) -> List[Any]:
+        """Search for users by username, case-insensitive."""
+        find_filter = {"username": {"$regex": query, "$options": "i"}}
+        if exclude_id:
+            find_filter["_id"] = {"$ne": ObjectId(exclude_id)}
+        cursor = self.col.find(find_filter).limit(limit)
+        return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor]
+
 
 class SessionRepository:
     def __init__(self):
@@ -101,6 +114,40 @@ class GroupRepository:
         """Delete a group by its ID."""
         await self.col.delete_one({"_id": ObjectId(group_id)})
 
+class AiSessionRepository:
+    """Repository for storing AI chat sessions for each user."""
+    def __init__(self):
+        self._db = connect()
+        self.col = self._db["ai_sessions"]
+
+    async def find_by_user_id(self, user_id: str) -> Optional[dict]:
+        """Find an AI chat session by user ID."""
+        doc = await self.col.find_one({"user_id": ObjectId(user_id)})
+        return normalize_doc(doc)
+
+    async def create(self, user_id: str) -> dict:
+        """Create a new AI chat session for a user."""
+        session = {"user_id": ObjectId(user_id), "messages": [], "created_at": datetime.utcnow()}
+        r = await self.col.insert_one(session)
+        doc = await self.col.find_one({"_id": r.inserted_id})
+        return normalize_doc(doc)
+
+    async def add_message(self, session_id: str, message: dict):
+        """Add a message to the session's messages array.
+        Message should be a dict with 'role' and 'content'.
+        """
+        await self.col.update_one(
+            {"_id": ObjectId(session_id)},
+            {"$push": {"messages": message}}
+        )
+
+    async def clear_messages(self, session_id: str):
+        """Clears all messages from a session's messages array."""
+        await self.col.update_one(
+            {"_id": ObjectId(session_id)},
+            {"$set": {"messages": []}}
+        )
+
 
 class ConversationRepository:
     """Simple conversation store for DMs or other conversation metadata.
@@ -132,17 +179,6 @@ class ConversationRepository:
         doc = await self.col.find_one({"_id": ObjectId(_id)})
         return normalize_doc(doc)
     
-    async def search_by_username(self, query: str, limit: int = 20, exclude_id: str = None) -> List[Any]:
-        """Search for users by username, case-insensitive."""
-        # This method seems to be misplaced in ConversationRepository. It should be in UserRepository.
-        # For now, I'll just fix the import path for it to work.
-        user_col = self._db["users"]
-        find_filter = {"username": {"$regex": query, "$options": "i"}}
-        if exclude_id:
-            find_filter["_id"] = {"$ne": ObjectId(exclude_id)}
-        cursor = user_col.find(find_filter).limit(limit)
-        return [normalize_doc(u, exclude={"password_hash"}) async for u in cursor] # type: ignore
-
     async def add_message(self, conv_id: str, message: dict):
         """Add a message to the conversation.
         This assumes the conversation document has a `messages` array.

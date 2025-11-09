@@ -44,10 +44,15 @@ async def join_room(sid, data):
         # If it's a DM, fetch the other participant's username
         if room.startswith("dm:"):
             participant_ids = room.split(":")[1].split("-")
-            other_user_id = [uid for uid in participant_ids if uid != user_id][0]
-            other_user = await user_repo.find_by_id(other_user_id)
-            other_username = other_user.get("username", "Unknown User")
-            room_display = f"DM with {other_username}"
+            other_user_ids = [uid for uid in participant_ids if uid != user_id]
+
+            if other_user_ids:
+                other_user_id = other_user_ids[0]
+                other_user = await user_repo.find_by_id(other_user_id)
+                other_username = other_user.get("username", "Unknown User") if other_user else "Unknown User"
+                room_display = f"DM with {other_username}"
+            else: # This is a DM with self
+                room_display = f"{username} (You)"
         else:
             room_display = room
 
