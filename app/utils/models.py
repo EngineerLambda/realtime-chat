@@ -55,6 +55,9 @@ class CreateGroupPayload(BaseModel):
 class JoinGroupPayload(BaseModel):
     name: str
 
+class AiChatPayload(BaseModel):
+    content: str
+
 
 # --- Database Models ---
 

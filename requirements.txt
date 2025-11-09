@@ -11,3 +11,9 @@ python-socketio>=5.9
 python-engineio>=4.3
 pytest>=7.0
 pydantic[email]
+langgraph
+langchain
+langchain-core>=0.1.52
+langchain-community>=0.0.38
+groq
+tavily-python>=0.3.3

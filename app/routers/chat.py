@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import StreamingResponse
 from ..services.chat_service import ChatService
-from typing import Optional
-from ..utils.models import CreateGroupPayload, JoinGroupPayload
+from typing import Optional, AsyncGenerator
+from ..utils.models import CreateGroupPayload, JoinGroupPayload, AiChatPayload
+from ..services.ai_service import get_ai_response_stream
+from ..utils.repositories import AiSessionRepository
+import json
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatService()
@@ -77,3 +81,61 @@ async def search_users(q: str, request: Request):
 async def list_all_users(request: Request):
     """List all users on the platform, excluding the current user."""
     return await service.users.list_all()
+
+
+@router.get("/ai/history")
+async def get_ai_chat_history(request: Request):
+    """Get the AI chat history for the current user."""
+    user_id = request.state.user.get("_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    
+    ai_sessions = AiSessionRepository()
+    session = await ai_sessions.find_by_user_id(user_id)
+    if not session:
+        session = await ai_sessions.create(user_id)
+    
+    # Add a room_id for frontend consistency
+    session["room_id"] = "ai_assistant"
+    return session
+
+@router.delete("/ai/history")
+async def clear_ai_chat_history(request: Request):
+    """Clears the AI chat history for the current user."""
+    user_id = request.state.user.get("_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+    
+    ai_sessions = AiSessionRepository()
+    session = await ai_sessions.find_by_user_id(user_id)
+    if session:
+        await ai_sessions.clear_messages(session["_id"])
+    
+    return {"ok": True, "message": "AI chat history cleared."}
+
+
+@router.post("/ai")
+async def chat_with_ai(payload: AiChatPayload, request: Request):
+    """Streams a response from the AI assistant."""
+    user_id = request.state.user.get("_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+
+    ai_sessions = AiSessionRepository()
+    session = await ai_sessions.find_by_user_id(user_id)
+    if not session:
+        session = await ai_sessions.create(user_id)
+
+    await ai_sessions.add_message(session["_id"], {"role": "user", "content": payload.content})
+
+    # Limit history to the last 20 messages to keep context relevant and manage token usage
+    history = session.get("messages", [])[-20:]
+
+    async def stream_wrapper() -> AsyncGenerator[str, None]:
+        full_response = ""
+        async for chunk in get_ai_response_stream(payload.content, history):
+            full_response += chunk
+            yield chunk
+        await ai_sessions.add_message(session["_id"], {"role": "assistant", "content": full_response})
+
+    return StreamingResponse(stream_wrapper(), media_type="text/event-stream")
