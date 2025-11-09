@@ -1,15 +1,10 @@
 from fastapi import APIRouter, Depends, Request
 from ..services.chat_service import ChatService
 from typing import Optional
-from pydantic import BaseModel
+from ..utils.models import CreateGroupPayload, JoinGroupPayload
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 service = ChatService()
-
-
-class CreateGroupPayload(BaseModel):
-    name: str
-    members: list[str]
 
 
 @router.post("/groups")
@@ -20,10 +15,6 @@ async def create_group(payload: CreateGroupPayload, request: Request):
     members = list(set(payload.members + [user_id]))
     group = await service.groups.create({"name": payload.name, "members": members})
     return group
-
-
-class JoinGroupPayload(BaseModel):
-    name: str
 
 
 @router.post("/groups/join-or-create")
@@ -79,7 +70,7 @@ async def delete_conversation(conv_id: str, request: Request):
 async def search_users(q: str, request: Request):
     """Search for users by username."""
     current_user_id = request.state.user.get("_id")
-    return await service.users.search_by_username(q, exclude_id=current_user_id)
+    return await service.users.search_by_username(q, exclude_id=str(current_user_id))
 
 
 @router.get("/users")

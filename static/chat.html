@@ -122,8 +122,15 @@
         const openBtn = document.createElement('button');
         openBtn.className = 'flex-grow text-left py-1 px-2 rounded hover:bg-gray-200';
         const currentUserId = (document.cookie || '').split(';').map(c => c.trim()).find(c => c.startsWith('user_id='))?.split('=')[1];
-        const title = c.participant_ids.filter(id => id !== currentUserId)[0] || c.participant_ids[0];
-        const display = c.participant_display_name || title;
+        
+        const isSelfDm = c.participant_ids && c.participant_ids.every(id => id === currentUserId);
+        let display = c.participant_display_name || 'DM'; // Default to the name from backend
+
+        // Override for self-DM case
+        if (isSelfDm) { 
+          display = 'You (Saved Messages)';
+        }
+
         let preview = '';
         if (c.last_message && c.last_message.content) {
           preview = ' — ' + (c.last_message.content.length > 30 ? c.last_message.content.slice(0, 27) + '...' : c.last_message.content);

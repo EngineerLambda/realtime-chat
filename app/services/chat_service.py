@@ -12,18 +12,15 @@ class ChatService:
         self.convs = ConversationRepository()
 
     async def create_dm(self, user_a: str, user_b: str) -> dict:
-        print(f"Creating or retrieving DM between {user_a} and {user_b}")  # Debug log
         existing = await self.convs.find_dm_between(user_a, user_b)
         ids = sorted([user_a, user_b])
         room_id = f"dm:{ids[0]}-{ids[1]}"
         if existing:
-            print(f"Existing DM found: {existing}")  # Debug log
             existing["room_id"] = room_id
             return existing
         doc = {"participant_ids": ids, "type": "dm"}
         created = await self.convs.create(doc)
         created["room_id"] = room_id
-        print(f"New DM created: {created}")  # Debug log
         return created
 
     async def join_or_create_group_by_name(self, group_name: str, user_id: str) -> dict:
@@ -32,20 +29,15 @@ class ChatService:
         if group:
             # Group exists, ensure user is a member
             await self.groups.add_member(group["_id"], user_id)
-            print(f"User {user_id} joined existing group '{group_name}'")
         else:
             # Group doesn't exist, create it with the user as the first member
             doc = {"name": group_name, "members": [user_id], "messages": []}
             group = await self.groups.create(doc)
-            print(f"Created new group '{group_name}' for user {user_id}")
         return group
 
     async def list_user_chats(self, user_id: str):
-        print(f"Listing chats for user {user_id}")  # Debug log
         groups = await self.groups.find_by_member(user_id)
         convs = await self.convs.find_by_participant(user_id)
-        print(f"Groups found: {groups}")  # Debug log
-        print(f"Conversations found: {convs}")  # Debug log
         
         # Process conversations (DMs)
         processed_convs = []
@@ -55,6 +47,10 @@ class ChatService:
                 if len(parts) == 2:
                     c["room_id"] = f"dm:{parts[0]}-{parts[1]}"
                     other_id = next((pid for pid in parts if pid != user_id), None)
+                    # If other_id is None, it's a DM with self.
+                    if other_id is None and len(set(parts)) == 1:
+                        other_id = user_id
+
                     other_user = await self.users.find_by_id(other_id) if other_id else None
                     c["participant_display_name"] = other_user.get("username") if other_user else "Unknown User"
                 if c.get("messages"):
