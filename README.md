@@ -60,8 +60,8 @@ This is a full-featured, realtime chat application built with FastAPI, Socket.IO
     JWT_SECRET="a_very_secret_key_for_jwt_tokens" # 32 bytes hex string generated. Can be generated using: `openssl rand -hex 32`.
 
     # --- AI Services (Required for AI Assistant) ---
-    GROQ_API_KEY="your_groq_api_key" Gotten from https://groq.com/
-    TAVILY_API_KEY="your_tavily_api_key" Gotten from https://tavily.com/
+    GROQ_API_KEY="your_groq_api_key" # Gotten from https://groq.com/
+    TAVILY_API_KEY="your_tavily_api_key" # Gotten from https://tavily.com/
 
     # --- Email Service from https://www.zoho.com (Required for Forgot Password) ---
     ZOHO_SMTP_SERVER="smtp.zoho.com"
