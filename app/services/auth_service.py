@@ -48,11 +48,9 @@ class AuthService:
         if not smtp_is_configured():
             raise ConnectionError("email_service_not_configured")
         
-        user = await self.users.find_by_email(email)
+        user = await self.users.find_by_email(email.lower())
         if not user:
-            # Don't reveal if user exists, just return success
-            print(f"Password reset requested for non-existent user: {email}")
-            return
+            raise ValueError("user_not_found")
 
         otp_code = generate_otp()
         otp_ttl_minutes = 10
@@ -60,12 +58,12 @@ class AuthService:
         
         await self.users.update(user["_id"], {"otp_code": otp_code, "otp_expires": otp_expires})
         
-        email_sent = send_otp_email(email, otp_code, otp_ttl_minutes)
+        email_sent = send_otp_email(user["email"], otp_code, otp_ttl_minutes)
         if not email_sent:
             raise ConnectionError("failed_to_send_email")
 
     async def reset_password(self, email: str, otp_code: str, new_password: str):
-        user = await self.users.find_by_email(email)
+        user = await self.users.find_by_email(email.lower())
         if not user:
             raise ValueError("invalid_user")
 

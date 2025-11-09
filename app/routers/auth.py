@@ -85,8 +85,11 @@ async def logout(payload: LogoutPayload = None, request: Request = None):
 async def forgot_password(payload: ForgotPasswordPayload):
     try:
         await auth.request_password_reset(payload.email)
-        # Always return a success message to prevent user enumeration
-        return {"message": "If an account with that email exists, a password reset OTP has been sent."}
+        return {"message": "A password reset OTP has been sent to your email."}
+    except ValueError as e:
+        if str(e) == "user_not_found":
+            raise HTTPException(status_code=404, detail="User with that email does not exist.")
+        raise HTTPException(status_code=400, detail=str(e))
     except ConnectionError as e:
         if str(e) == "email_service_not_configured":
             raise HTTPException(status_code=503, detail="Email service is not configured.")
